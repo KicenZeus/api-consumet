@@ -8,9 +8,20 @@ const fastify = Fastify({
   logger: true,
 });
 
-// Provider anime resmi yang aktif di versi 1.8.8
-const hianime = new ANIME.HiAnime();
-const animepahe = new ANIME.AnimePahe();
+// Inisialisasi aman agar serverless tidak pernah crash saat startup
+let hianime: any = null;
+let animepahe: any = null;
+
+try {
+  const AnimeModule: any = ANIME;
+  const HianimeClass = AnimeModule?.Hianime || AnimeModule?.HiAnime;
+  if (HianimeClass) hianime = new HianimeClass();
+
+  const AnimePaheClass = AnimeModule?.AnimePahe;
+  if (AnimePaheClass) animepahe = new AnimePaheClass();
+} catch (err) {
+  console.warn('Gagal memuat provider anime:', err);
+}
 
 const initApp = (async () => {
   const PORT = Number(process.env.PORT) || 3000;
@@ -35,10 +46,15 @@ const initApp = (async () => {
     if (!query) return reply.status(400).send({ error: 'Parameter query diperlukan' });
 
     try {
-      const data = await hianime.search(query).catch(async () => {
-        return await animepahe.search(query);
-      });
-      return reply.send(data);
+      if (hianime) {
+        const data = await hianime.search(query);
+        return reply.send(data);
+      }
+      if (animepahe) {
+        const data = await animepahe.search(query);
+        return reply.send(data);
+      }
+      return reply.send({ results: [] });
     } catch (err: any) {
       return reply.status(500).send({ error: err.message, results: [] });
     }
@@ -48,10 +64,15 @@ const initApp = (async () => {
   fastify.get('/anime/info/:id', async (request: any, reply) => {
     const { id } = request.params;
     try {
-      const data = await hianime.fetchAnimeInfo(id).catch(async () => {
-        return await animepahe.fetchAnimeInfo(id);
-      });
-      return reply.send(data);
+      if (hianime) {
+        const data = await hianime.fetchAnimeInfo(id);
+        return reply.send(data);
+      }
+      if (animepahe) {
+        const data = await animepahe.fetchAnimeInfo(id);
+        return reply.send(data);
+      }
+      return reply.status(404).send({ error: 'Provider anime tidak tersedia' });
     } catch (err: any) {
       return reply.status(500).send({ error: err.message });
     }
@@ -63,16 +84,21 @@ const initApp = (async () => {
     const { server } = request.query;
 
     try {
-      const data = await hianime.fetchEpisodeSources(episodeId, server).catch(async () => {
-        return await animepahe.fetchEpisodeSources(episodeId);
-      });
-      return reply.send(data);
+      if (hianime) {
+        const data = await hianime.fetchEpisodeSources(episodeId, server);
+        return reply.send(data);
+      }
+      if (animepahe) {
+        const data = await animepahe.fetchEpisodeSources(episodeId);
+        return reply.send(data);
+      }
+      return reply.send({ sources: [] });
     } catch (err: any) {
       return reply.status(500).send({ error: err.message, sources: [] });
     }
   });
 
-  // 5. Endpoint AniList Info (Sinkron dengan AniList ID frontend)
+  // 5. Endpoint AniList Info (Sinkron dengan data AniList frontend)
   fastify.get('/anime/anilist/info/:id', async (request: any, reply) => {
     const { id } = request.params;
     try {
