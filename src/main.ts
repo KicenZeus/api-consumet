@@ -8,7 +8,6 @@ const fastify = Fastify({
   logger: true,
 });
 
-// Inisialisasi aman agar serverless tidak pernah crash saat startup
 let hianime: any = null;
 let animepahe: any = null;
 
@@ -31,8 +30,9 @@ const initApp = (async () => {
     methods: 'GET',
   });
 
-  // 1. Root & Health Check
+  // 1. Root & Health
   fastify.get('/', (_, reply) => {
+    console.log('[LOG] Root / diakses');
     reply.status(200).send('Welcome to consumet api! 🎉');
   });
 
@@ -40,67 +40,11 @@ const initApp = (async () => {
     reply.status(200).send({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  // 2. Pencarian Anime (HiAnime / AnimePahe)
-  fastify.get('/anime/search', async (request: any, reply) => {
-    const query = request.query.query || request.query.q || request.query.keyword;
-    if (!query) return reply.status(400).send({ error: 'Parameter query diperlukan' });
-
-    try {
-      if (hianime) {
-        const data = await hianime.search(query);
-        return reply.send(data);
-      }
-      if (animepahe) {
-        const data = await animepahe.search(query);
-        return reply.send(data);
-      }
-      return reply.send({ results: [] });
-    } catch (err: any) {
-      return reply.status(500).send({ error: err.message, results: [] });
-    }
-  });
-
-  // 3. Info Anime & Daftar Episode
-  fastify.get('/anime/info/:id', async (request: any, reply) => {
-    const { id } = request.params;
-    try {
-      if (hianime) {
-        const data = await hianime.fetchAnimeInfo(id);
-        return reply.send(data);
-      }
-      if (animepahe) {
-        const data = await animepahe.fetchAnimeInfo(id);
-        return reply.send(data);
-      }
-      return reply.status(404).send({ error: 'Provider anime tidak tersedia' });
-    } catch (err: any) {
-      return reply.status(500).send({ error: err.message });
-    }
-  });
-
-  // 4. Ambil Link Video Streaming Episode (.m3u8)
-  fastify.get('/anime/watch/:episodeId', async (request: any, reply) => {
-    const { episodeId } = request.params;
-    const { server } = request.query;
-
-    try {
-      if (hianime) {
-        const data = await hianime.fetchEpisodeSources(episodeId, server);
-        return reply.send(data);
-      }
-      if (animepahe) {
-        const data = await animepahe.fetchEpisodeSources(episodeId);
-        return reply.send(data);
-      }
-      return reply.send({ sources: [] });
-    } catch (err: any) {
-      return reply.status(500).send({ error: err.message, sources: [] });
-    }
-  });
-
-  // 5. Endpoint AniList Info (Sinkron dengan data AniList frontend)
+  // 2. Info Anime & Daftar Episode
   fastify.get('/anime/anilist/info/:id', async (request: any, reply) => {
     const { id } = request.params;
+    console.log(`[INFO REQUEST] Mengambil data anime ID: ${id}`);
+
     try {
       const gqlRes = await fetch('https://graphql.anilist.co', {
         method: 'POST',
@@ -136,22 +80,40 @@ const initApp = (async () => {
         episodes,
       });
     } catch (err: any) {
+      console.error('[INFO ERROR]', err.message);
       return reply.status(500).send({ error: err.message, episodes: [] });
     }
   });
 
-  // 6. Endpoint AniList Watch
+  // 3. Watch Episode (Dengan Log Terperinci & Multi-Server)
   fastify.get('/anime/anilist/watch/:episodeId', async (request: any, reply) => {
     const { episodeId } = request.params;
     const [animeId, epPart] = episodeId.split('?');
     const epMatch = epPart ? epPart.match(/ep=(\d+)/) : null;
     const epNum = epMatch ? epMatch[1] : '1';
 
+    console.log(`[WATCH REQUEST DITERIMA!] Anime ID: ${animeId}, Episode: ${epNum}`);
+
+    // Coba ambil dari HiAnime/AnimePahe jika tersedia
+    if (hianime) {
+      try {
+        const streamData = await hianime.fetchEpisodeSources(episodeId);
+        if (streamData?.sources?.length > 0) {
+          console.log('[WATCH SUCCESS] Sumber HiAnime HLS ditemukan');
+          return reply.send(streamData);
+        }
+      } catch (e: any) {
+        console.log('[WATCH NOTICE] HiAnime fallback:', e.message);
+      }
+    }
+
+    // Server pemutar alternatif
+    console.log(`[WATCH FALLBACK] Mengirimkan embed player untuk episode ${epNum}`);
     return reply.send({
-      headers: { Referer: 'https://player.videasy.to' },
+      headers: { Referer: 'https://vidsrc.cc' },
       sources: [
         {
-          url: `https://player.videasy.to/anime/${animeId}/${epNum}/sub`,
+          url: `https://vidsrc.cc/v2/embed/anime/${animeId}/${epNum}/sub`,
           isM3U8: false,
           quality: 'default',
         },
@@ -161,7 +123,8 @@ const initApp = (async () => {
   });
 
   // 404 Handler
-  fastify.get('*', (_, reply) => {
+  fastify.get('*', (req: any, reply) => {
+    console.log(`[404 NOT FOUND] ${req.url}`);
     reply.status(404).send({ message: 'Route not found' });
   });
 
